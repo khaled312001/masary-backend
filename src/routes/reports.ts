@@ -42,3 +42,29 @@ reportsRouter.delete("/:id", requireAdmin, async (req, res) => {
     res.status(400).json({ error: "تعذر الحذف" });
   }
 });
+
+// Admin: mark report as paid (manual confirmation after bank transfer)
+reportsRouter.post("/:id/mark-paid", requireAdmin, async (req, res) => {
+  try {
+    const updated = await prisma.report.update({
+      where: { id: req.params.id },
+      data: { isPaid: true, paidAt: new Date() }
+    });
+    res.json({ ok: true, isPaid: updated.isPaid, paidAt: updated.paidAt });
+  } catch {
+    res.status(400).json({ error: "تعذر التعديل" });
+  }
+});
+
+// Admin: revoke paid status
+reportsRouter.post("/:id/mark-unpaid", requireAdmin, async (req, res) => {
+  try {
+    const updated = await prisma.report.update({
+      where: { id: req.params.id },
+      data: { isPaid: false, paidAt: null }
+    });
+    res.json({ ok: true, isPaid: updated.isPaid });
+  } catch {
+    res.status(400).json({ error: "تعذر التعديل" });
+  }
+});

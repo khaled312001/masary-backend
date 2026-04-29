@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
-import { requireAdmin } from "../middleware/auth";
 import { analyzeWithClaude, type AnalysisInput } from "../lib/ai";
 
 export const analyzeRouter = Router();
@@ -14,7 +13,7 @@ const Schema = z.object({
   currentCourses: z.string().max(2000).optional()
 });
 
-analyzeRouter.post("/", requireAdmin, async (req, res) => {
+analyzeRouter.post("/", async (req, res) => {
   const parsed = Schema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "الرجاء التحقق من الحقول المطلوبة" });

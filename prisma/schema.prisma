@@ -126,9 +126,12 @@ model Report {
   currentCourses  String?  @db.Text
   matchedJobId    String?
   data            Json
+  isPaid          Boolean  @default(false)
+  paidAt          DateTime?
   createdAt       DateTime @default(now())
 
   @@index([createdAt])
+  @@index([isPaid])
 }
 
 model Setting {
