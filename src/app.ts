@@ -14,6 +14,7 @@ import { coursesRouter } from "./routes/courses";
 import { reportsRouter } from "./routes/reports";
 import { analyzeRouter } from "./routes/analyze";
 import { statsRouter } from "./routes/stats";
+import { settingsRouter } from "./routes/settings";
 
 export function createApp() {
   const app = express();
@@ -66,6 +67,7 @@ export function createApp() {
   app.use("/api/reports", reportsRouter);
   app.use("/api/analyze", analyzeRouter);
   app.use("/api/stats", statsRouter);
+  app.use("/api/settings", settingsRouter);
 
   app.get("/", (_req, res) => {
     res.json({ name: "masary-backend", version: "1.0.0", status: "ok" });

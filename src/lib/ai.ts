@@ -1,10 +1,15 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { getSettingValue } from "../routes/settings";
 
 export const ANALYSIS_MODEL = "claude-sonnet-4-6";
 
-export function getClient() {
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) throw new Error("ANTHROPIC_API_KEY is not configured");
+export async function getClient() {
+  const key = await getSettingValue("ANTHROPIC_API_KEY");
+  if (!key) {
+    throw new Error(
+      "مفتاح ANTHROPIC_API_KEY غير مهيأ. أضفه من صفحة الإعدادات في لوحة التحكم."
+    );
+  }
   return new Anthropic({ apiKey: key });
 }
 
@@ -81,7 +86,7 @@ const SCHEMA_HINT = `الـ JSON المتوقع:
 }`;
 
 export async function analyzeWithClaude(input: AnalysisInput): Promise<AnalysisReport> {
-  const client = getClient();
+  const client = await getClient();
 
   const userPayload = {
     user: {

@@ -130,3 +130,10 @@ model Report {
 
   @@index([createdAt])
 }
+
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique @db.VarChar(80)
+  value     String   @db.Text
+  updatedAt DateTime @updatedAt
+}
