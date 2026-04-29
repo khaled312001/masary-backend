@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { jsonrepair } from "jsonrepair";
 import { getSettingValue } from "../routes/settings";
 
 export const ANALYSIS_MODEL = "claude-sonnet-4-6";
@@ -107,7 +108,7 @@ export async function analyzeWithClaude(input: AnalysisInput): Promise<AnalysisR
 
   const response = await client.messages.create({
     model: ANALYSIS_MODEL,
-    max_tokens: 4000,
+    max_tokens: 6000,
     temperature: 0.3,
     system: SYSTEM_PROMPT,
     messages: [{ role: "user", content: userMessage }]
@@ -119,7 +120,7 @@ export async function analyzeWithClaude(input: AnalysisInput): Promise<AnalysisR
     .trim();
 
   const jsonText = extractJson(text);
-  const parsed = JSON.parse(jsonText) as AnalysisReport;
+  const parsed = parseJsonSafely(jsonText);
   return normalize(parsed);
 }
 
@@ -130,6 +131,36 @@ function extractJson(text: string): string {
   const end = text.lastIndexOf("}");
   if (start >= 0 && end > start) return text.slice(start, end + 1);
   return text;
+}
+
+function parseJsonSafely(jsonText: string): AnalysisReport {
+  // Try direct parse first
+  try {
+    return JSON.parse(jsonText) as AnalysisReport;
+  } catch (e) {
+    // Fall through to repair
+  }
+
+  // Try a quick manual cleanup (trailing commas, smart quotes)
+  const cleaned = jsonText
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/,(\s*[}\]])/g, "$1");
+  try {
+    return JSON.parse(cleaned) as AnalysisReport;
+  } catch (e) {
+    // Fall through to jsonrepair
+  }
+
+  // Heavy-duty repair via jsonrepair library
+  try {
+    const repaired = jsonrepair(jsonText);
+    return JSON.parse(repaired) as AnalysisReport;
+  } catch (e: any) {
+    throw new Error(
+      "تعذّر قراءة استجابة الذكاء الاصطناعي. حاول مرة أخرى — قد تكون الاستجابة قد قُطعت."
+    );
+  }
 }
 
 function normalize(r: AnalysisReport): AnalysisReport {
