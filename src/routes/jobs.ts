@@ -51,7 +51,7 @@ jobsRouter.post("/", requireAdmin, async (req, res) => {
       skills: skills?.length
         ? { create: skills.map((s) => ({ skillId: s.skillId, importance: s.importance })) }
         : undefined
-    }
+    } as any
   });
   res.json(created);
 });
@@ -66,7 +66,7 @@ jobsRouter.patch("/:id", requireAdmin, async (req, res) => {
   try {
     const id = req.params.id;
     const updated = await prisma.$transaction(async (tx) => {
-      const job = await tx.job.update({ where: { id }, data: rest });
+      const job = await tx.job.update({ where: { id }, data: rest as any });
       if (skills) {
         await tx.jobSkill.deleteMany({ where: { jobId: id } });
         if (skills.length) {

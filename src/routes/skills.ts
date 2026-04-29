@@ -23,7 +23,7 @@ skillsRouter.post("/", requireAdmin, async (req, res) => {
     return;
   }
   try {
-    const created = await prisma.skill.create({ data: parsed.data });
+    const created = await prisma.skill.create({ data: parsed.data as any });
     res.json(created);
   } catch (e: any) {
     res.status(400).json({
@@ -41,7 +41,7 @@ skillsRouter.patch("/:id", requireAdmin, async (req, res) => {
   try {
     const updated = await prisma.skill.update({
       where: { id: req.params.id },
-      data: parsed.data
+      data: parsed.data as any
     });
     res.json(updated);
   } catch (e: any) {

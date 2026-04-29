@@ -29,7 +29,7 @@ platformsRouter.post("/", requireAdmin, async (req, res) => {
     res.status(400).json({ error: "بيانات غير صالحة" });
     return;
   }
-  const created = await prisma.platform.create({ data: clean(parsed.data) });
+  const created = await prisma.platform.create({ data: clean(parsed.data) as any });
   res.json(created);
 });
 
@@ -42,7 +42,7 @@ platformsRouter.patch("/:id", requireAdmin, async (req, res) => {
   try {
     const updated = await prisma.platform.update({
       where: { id: req.params.id },
-      data: clean(parsed.data)
+      data: clean(parsed.data) as any
     });
     res.json(updated);
   } catch {

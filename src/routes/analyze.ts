@@ -82,7 +82,7 @@ analyzeRouter.post("/", requireAdmin, async (req, res) => {
         currentCourses: data.currentCourses || null,
         matchedJobId: matchedJob?.id ?? null,
         data: report as any
-      },
+      } as any,
       select: { id: true }
     });
 

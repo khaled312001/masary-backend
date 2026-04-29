@@ -31,7 +31,7 @@ companiesRouter.post("/", requireAdmin, async (req, res) => {
     res.status(400).json({ error: "بيانات غير صالحة" });
     return;
   }
-  const created = await prisma.company.create({ data: clean(parsed.data) });
+  const created = await prisma.company.create({ data: clean(parsed.data) as any });
   res.json(created);
 });
 
@@ -44,7 +44,7 @@ companiesRouter.patch("/:id", requireAdmin, async (req, res) => {
   try {
     const updated = await prisma.company.update({
       where: { id: req.params.id },
-      data: clean(parsed.data)
+      data: clean(parsed.data) as any
     });
     res.json(updated);
   } catch {

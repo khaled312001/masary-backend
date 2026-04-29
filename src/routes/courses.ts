@@ -59,7 +59,7 @@ coursesRouter.post("/", requireAdmin, async (req, res) => {
       skills: skillIds?.length
         ? { create: skillIds.map((skillId) => ({ skillId })) }
         : undefined
-    }
+    } as any
   });
   res.json(created);
 });
@@ -76,7 +76,7 @@ coursesRouter.patch("/:id", requireAdmin, async (req, res) => {
     const updated = await prisma.$transaction(async (tx) => {
       const course = await tx.course.update({
         where: { id },
-        data: { ...rest, url: url === "" ? null : url }
+        data: { ...rest, url: url === "" ? null : url } as any
       });
       if (skillIds) {
         await tx.courseSkill.deleteMany({ where: { courseId: id } });
