@@ -124,6 +124,11 @@ model Report {
   employer        String?  @db.VarChar(200)
   currentSkills   String   @db.Text
   currentCourses  String?  @db.Text
+  cvText          String?  @db.MediumText
+  inputTokens     Int      @default(0)
+  outputTokens    Int      @default(0)
+  totalTokens     Int      @default(0)
+  claudeModel     String?  @db.VarChar(80)
   matchedJobId    String?
   data            Json
   isPaid          Boolean  @default(false)

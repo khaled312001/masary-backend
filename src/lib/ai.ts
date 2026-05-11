@@ -31,6 +31,13 @@ export type AnalysisInput = {
   employer?: string;
   currentSkills: string;
   currentCourses?: string;
+  cvText?: string;
+  cvFile?: {
+    mediaType: string;
+    dataBase64: string;
+  };
+  normalizedJobTitle?: string;
+  normalizedSkills?: string[];
   matchedJob: {
     titleAr: string;
     descriptionAr: string;
@@ -60,15 +67,23 @@ export type AnalysisReport = {
   finalAdvice: string;
 };
 
+export type ClaudeUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  model: string;
+};
+
 const SYSTEM_PROMPT = `أنت مستشار مهني خبير في سوق العمل السعودي والخليجي. مهمتك تحليل الفجوة بين مهارات المستخدم الحالية والمهارات المطلوبة لوظيفة معينة، ثم رسم مسار تعلم عملي وواقعي.
 
 قواعد صارمة:
 1. أجب باللغة العربية الفصحى البسيطة بنبرة لطيفة محفزة (مناسبة للسوق السعودي والخليجي).
 2. أعد إجابتك بصيغة JSON صحيحة 100% فقط، بدون أي نص قبل أو بعد JSON.
-3. اعتمد فقط على البيانات المقدمة لك في catalog عند الترشيح، ويمكنك إضافة اقتراحات عامة إذا كانت بدون رابط محدد.
+3. اربط النصائح ببيانات الوظائف والمهارات والكورسات والشركات المقدمة. عند نقص البيانات، استخدم معرفتك العامة بدون اختراع روابط غير موجودة.
 4. matchScore يجب أن يكون رقم بين 0 و 100 يعكس نسبة تطابق المهارات الحالية مع المطلوبة.
 5. learningPath: من 3 إلى 6 خطوات مرتبة منطقياً من الأساسيات إلى المتقدم.
-6. كن دقيقاً ومحفزاً وعملياً.`;
+6. استفد من نص السيرة الذاتية إن وجد، واستخرج منه قرائن المهارات والدورات والخبرة بالعربية أو الإنجليزية.
+7. كن دقيقاً ومحفزاً وعملياً.`;
 
 const SCHEMA_HINT = `الـ JSON المتوقع:
 {
@@ -86,16 +101,19 @@ const SCHEMA_HINT = `الـ JSON المتوقع:
   "finalAdvice": "..."
 }`;
 
-export async function analyzeWithClaude(input: AnalysisInput): Promise<AnalysisReport> {
+export async function analyzeWithClaude(input: AnalysisInput): Promise<{ report: AnalysisReport; usage: ClaudeUsage }> {
   const client = await getClient();
 
   const userPayload = {
     user: {
       fullName: input.fullName,
       jobTitle: input.jobTitle,
+      normalizedJobTitle: input.normalizedJobTitle || null,
       employer: input.employer || null,
       currentSkills: input.currentSkills,
-      currentCourses: input.currentCourses || null
+      currentCourses: input.currentCourses || null,
+      normalizedSkills: input.normalizedSkills || [],
+      cvText: input.cvText || null
     },
     matchedJob: input.matchedJob,
     catalog: {
@@ -105,13 +123,34 @@ export async function analyzeWithClaude(input: AnalysisInput): Promise<AnalysisR
   };
 
   const userMessage = `${SCHEMA_HINT}\n\nبيانات المستخدم والكتالوج:\n${JSON.stringify(userPayload, null, 2)}\n\nأعد JSON فقط.`;
+  const content: any[] = [];
+  if (input.cvFile?.mediaType === "application/pdf") {
+    content.push({
+      type: "document",
+      source: {
+        type: "base64",
+        media_type: input.cvFile.mediaType,
+        data: input.cvFile.dataBase64
+      }
+    });
+  } else if (input.cvFile?.mediaType.startsWith("image/")) {
+    content.push({
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: input.cvFile.mediaType,
+        data: input.cvFile.dataBase64
+      }
+    });
+  }
+  content.push({ type: "text", text: userMessage });
 
   const response = await client.messages.create({
     model: ANALYSIS_MODEL,
     max_tokens: 6000,
     temperature: 0.3,
     system: SYSTEM_PROMPT,
-    messages: [{ role: "user", content: userMessage }]
+    messages: [{ role: "user", content }]
   });
 
   const text = response.content
@@ -121,7 +160,15 @@ export async function analyzeWithClaude(input: AnalysisInput): Promise<AnalysisR
 
   const jsonText = extractJson(text);
   const parsed = parseJsonSafely(jsonText);
-  return normalize(parsed);
+  return {
+    report: normalize(parsed),
+    usage: {
+      inputTokens: response.usage.input_tokens ?? 0,
+      outputTokens: response.usage.output_tokens ?? 0,
+      totalTokens: (response.usage.input_tokens ?? 0) + (response.usage.output_tokens ?? 0),
+      model: ANALYSIS_MODEL
+    }
+  };
 }
 
 function extractJson(text: string): string {

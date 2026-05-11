@@ -2,6 +2,8 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { analyzeWithClaude, type AnalysisInput } from "../lib/ai";
+import { cvUpload, extractCvText } from "../lib/cvExtract";
+import { closest, splitList } from "../lib/textMatching";
 
 export const analyzeRouter = Router();
 
@@ -9,20 +11,35 @@ const Schema = z.object({
   fullName: z.string().min(2).max(100),
   jobTitle: z.string().min(2).max(150),
   employer: z.string().max(150).optional(),
-  currentSkills: z.string().min(2).max(2000),
+  currentSkills: z.string().max(2000).optional(),
   currentCourses: z.string().max(2000).optional()
 });
 
-analyzeRouter.post("/", async (req, res) => {
+analyzeRouter.post("/", cvUpload.single("cv"), async (req, res) => {
   const parsed = Schema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "الرجاء التحقق من الحقول المطلوبة" });
     return;
   }
-  const data = parsed.data;
 
   try {
-    const matchedJob = await findMatchingJob(data.jobTitle);
+    const cvText = await extractCvText(req.file);
+    const data = {
+      ...parsed.data,
+      currentSkills: (parsed.data.currentSkills || "").trim(),
+      currentCourses: (parsed.data.currentCourses || "").trim()
+    };
+
+    if (!data.currentSkills && !cvText) {
+      res.status(400).json({ error: "أدخل المهارات الحالية أو ارفع سيرة ذاتية لاستخراجها." });
+      return;
+    }
+
+    const currentSkillNames = splitList(data.currentSkills);
+    const skills = await upsertUserSkills(currentSkillNames);
+    const matchedJob = await findOrCreateMatchingJob(data.jobTitle, skills.map((s) => s.id));
+    const normalizedJobTitle = matchedJob.titleAr;
+    const normalizedSkillNames = skills.map((s) => s.nameAr);
 
     const catalogCourses = await prisma.course
       .findMany({
@@ -56,6 +73,12 @@ analyzeRouter.post("/", async (req, res) => {
       employer: data.employer,
       currentSkills: data.currentSkills,
       currentCourses: data.currentCourses,
+      cvText,
+      cvFile: req.file && (req.file.mimetype === "application/pdf" || req.file.mimetype.startsWith("image/"))
+        ? { mediaType: req.file.mimetype, dataBase64: req.file.buffer.toString("base64") }
+        : undefined,
+      normalizedJobTitle,
+      normalizedSkills: normalizedSkillNames,
       matchedJob: matchedJob
         ? {
             titleAr: matchedJob.titleAr,
@@ -70,15 +93,21 @@ analyzeRouter.post("/", async (req, res) => {
       catalogCompanies
     };
 
-    const report = await analyzeWithClaude(aiInput);
+    const { report, usage } = await analyzeWithClaude(aiInput);
+    await persistReportSkills(report, matchedJob.id, matchedJob.category === "مضافة من المستخدم");
 
     const saved = await prisma.report.create({
       data: {
         fullName: data.fullName,
-        jobTitle: data.jobTitle,
+        jobTitle: normalizedJobTitle,
         employer: data.employer || null,
         currentSkills: data.currentSkills,
         currentCourses: data.currentCourses || null,
+        cvText: cvText || null,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        totalTokens: usage.totalTokens,
+        claudeModel: usage.model,
         matchedJobId: matchedJob?.id ?? null,
         data: report as any
       } as any,
@@ -92,26 +121,70 @@ analyzeRouter.post("/", async (req, res) => {
   }
 });
 
-async function findMatchingJob(title: string) {
-  const normalized = title.trim();
+async function upsertUserSkills(names: string[]) {
+  if (!names.length) return [];
 
-  const exact = await prisma.job
-    .findFirst({
-      where: { titleAr: normalized },
-      include: { skills: { include: { skill: true } } }
-    })
-    .catch(() => null);
-  if (exact) return exact;
+  const existing = await prisma.skill.findMany();
+  const output: { id: string; nameAr: string }[] = [];
 
-  return await prisma.job
-    .findFirst({
-      where: {
-        OR: [
-          { titleAr: { contains: normalized } },
-          { titleEn: { contains: normalized } }
-        ]
-      },
-      include: { skills: { include: { skill: true } } }
-    })
-    .catch(() => null);
+  for (const name of names) {
+    const match = closest(existing, name, (s) => [s.nameAr, s.nameEn], 0.82);
+    if (match) {
+      output.push({ id: match.item.id, nameAr: match.item.nameAr });
+      continue;
+    }
+
+    const created = await prisma.skill.upsert({
+      where: { nameAr: name },
+      update: {},
+      create: { nameAr: name, category: "مضافة من المستخدم" }
+    });
+    existing.push(created);
+    output.push({ id: created.id, nameAr: created.nameAr });
+  }
+
+  return output;
+}
+
+async function findOrCreateMatchingJob(title: string, skillIds: string[]) {
+  const jobs = await prisma.job.findMany({
+    include: { skills: { include: { skill: true } } }
+  });
+
+  const match = closest(jobs, title, (j) => [j.titleAr, j.titleEn], 0.76);
+  if (match) return match.item;
+
+  const created = await prisma.job.create({
+    data: {
+      titleAr: title.trim(),
+      descriptionAr: `وظيفة أضافها مستخدم أثناء إنشاء تقرير. تحتاج مراجعة وتفصيلاً من الإدارة: ${title.trim()}`,
+      category: "مضافة من المستخدم",
+      skills: skillIds.length
+        ? { create: skillIds.slice(0, 20).map((skillId) => ({ skillId, importance: 3 })) }
+        : undefined
+    },
+    include: { skills: { include: { skill: true } } }
+  });
+
+  return created;
+}
+
+async function persistReportSkills(
+  report: Awaited<ReturnType<typeof analyzeWithClaude>>["report"],
+  jobId: string,
+  attachToJob: boolean
+) {
+  const names = [
+    ...report.presentSkills.map((s) => s.name),
+    ...report.partialSkills.map((s) => s.name),
+    ...report.missingSkills.map((s) => s.name)
+  ].filter(Boolean);
+
+  const skills = await upsertUserSkills(names);
+  if (!attachToJob || !skills.length) return;
+
+  await prisma.jobSkill.createMany({
+    data: skills.map((skill) => ({ jobId, skillId: skill.id, importance: 3 })),
+    skipDuplicates: true
+  });
 }
