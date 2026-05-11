@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { requireAdmin } from "../middleware/auth";
+import { closest, normalizeText } from "../lib/textMatching";
 
 export const skillsRouter = Router();
 
@@ -23,6 +24,11 @@ skillsRouter.post("/", requireAdmin, async (req, res) => {
     return;
   }
   try {
+    const duplicate = await findMatchingSkill(parsed.data.nameAr, parsed.data.nameEn);
+    if (duplicate) {
+      res.status(409).json({ error: `اسم المهارة موجود مسبقاً باسم: ${duplicate.nameAr}` });
+      return;
+    }
     const created = await prisma.skill.create({ data: parsed.data as any });
     res.json(created);
   } catch (e: any) {
@@ -39,6 +45,13 @@ skillsRouter.patch("/:id", requireAdmin, async (req, res) => {
     return;
   }
   try {
+    if (parsed.data.nameAr || parsed.data.nameEn) {
+      const duplicate = await findMatchingSkill(parsed.data.nameAr, parsed.data.nameEn, req.params.id);
+      if (duplicate) {
+        res.status(409).json({ error: `اسم المهارة موجود مسبقاً باسم: ${duplicate.nameAr}` });
+        return;
+      }
+    }
     const updated = await prisma.skill.update({
       where: { id: req.params.id },
       data: parsed.data as any
@@ -50,6 +63,21 @@ skillsRouter.patch("/:id", requireAdmin, async (req, res) => {
     });
   }
 });
+
+async function findMatchingSkill(nameAr?: string, nameEn?: string | null, exceptId?: string) {
+  const names = [nameAr, nameEn].filter(Boolean).map(String);
+  if (!names.length) return null;
+
+  const rows = await prisma.skill.findMany({
+    where: exceptId ? { id: { not: exceptId } } : undefined
+  });
+
+  return rows.find((row) =>
+    names.some((name) =>
+      [row.nameAr, row.nameEn].filter(Boolean).some((existing) => normalizeText(name) === normalizeText(String(existing)))
+    )
+  ) ?? closest(rows, names[0], (row) => [row.nameAr, row.nameEn], 0.9)?.item ?? null;
+}
 
 skillsRouter.delete("/:id", requireAdmin, async (req, res) => {
   try {

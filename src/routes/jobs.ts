@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { requireAdmin } from "../middleware/auth";
+import { closest, normalizeText } from "../lib/textMatching";
 
 export const jobsRouter = Router();
 
@@ -45,6 +46,11 @@ jobsRouter.post("/", requireAdmin, async (req, res) => {
     return;
   }
   const { skills, ...rest } = parsed.data;
+  const duplicate = await findMatchingJobTitle(rest.titleAr, rest.titleEn);
+  if (duplicate) {
+    res.status(409).json({ error: `المسمى الوظيفي موجود مسبقاً باسم: ${duplicate.titleAr}` });
+    return;
+  }
   const created = await prisma.job.create({
     data: {
       ...rest,
@@ -65,6 +71,13 @@ jobsRouter.patch("/:id", requireAdmin, async (req, res) => {
   const { skills, ...rest } = parsed.data;
   try {
     const id = req.params.id;
+    if (rest.titleAr || rest.titleEn) {
+      const duplicate = await findMatchingJobTitle(rest.titleAr, rest.titleEn, id);
+      if (duplicate) {
+        res.status(409).json({ error: `المسمى الوظيفي موجود مسبقاً باسم: ${duplicate.titleAr}` });
+        return;
+      }
+    }
     const updated = await prisma.$transaction(async (tx) => {
       const job = await tx.job.update({ where: { id }, data: rest as any });
       if (skills) {
@@ -82,6 +95,21 @@ jobsRouter.patch("/:id", requireAdmin, async (req, res) => {
     res.status(400).json({ error: "تعذر التحديث" });
   }
 });
+
+async function findMatchingJobTitle(titleAr?: string, titleEn?: string | null, exceptId?: string) {
+  const names = [titleAr, titleEn].filter(Boolean).map(String);
+  if (!names.length) return null;
+
+  const rows = await prisma.job.findMany({
+    where: exceptId ? { id: { not: exceptId } } : undefined
+  });
+
+  return rows.find((row) =>
+    names.some((name) =>
+      [row.titleAr, row.titleEn].filter(Boolean).some((existing) => normalizeText(name) === normalizeText(String(existing)))
+    )
+  ) ?? closest(rows, names[0], (row) => [row.titleAr, row.titleEn], 0.9)?.item ?? null;
+}
 
 jobsRouter.delete("/:id", requireAdmin, async (req, res) => {
   try {

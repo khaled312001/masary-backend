@@ -1,26 +1,34 @@
 export function normalizeText(value: string) {
   return value
+    .normalize("NFKC")
     .toLowerCase()
     .trim()
-    .replace(/[أإآا]/g, "ا")
-    .replace(/ى/g, "ي")
-    .replace(/ة/g, "ه")
+    .replace(/[إأٱآا]/g, "ا")
+    .replace(/[ىیي]/g, "ي")
+    .replace(/[كک]/g, "ك")
+    .replace(/[ةۀ]/g, "ه")
     .replace(/ؤ/g, "و")
     .replace(/ئ/g, "ي")
-    .replace(/[ًٌٍَُِّْـ]/g, "")
+    .replace(/ء/g, "")
+    .replace(/[ًٌٍَُِّْٰـ]/g, "")
+    .replace(/[ﻻﻷﻹﻵ]/g, "لا")
     .replace(/[^\p{L}\p{N}\s+#.]/gu, " ")
     .replace(/\s+/g, " ");
 }
 
 export function splitList(value: string) {
-  return Array.from(
-    new Set(
-      value
-        .split(/[,،؛;\n|]/g)
-        .map((s) => s.trim())
-        .filter((s) => s.length >= 2 && s.length <= 120)
-    )
-  );
+  const seen = new Set<string>();
+  const out: string[] = [];
+
+  for (const item of value.split(/[,،؛;\n|]/g)) {
+    const text = item.trim();
+    const normalized = normalizeText(text);
+    if (text.length < 2 || text.length > 120 || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(text);
+  }
+
+  return out;
 }
 
 export function similarity(a: string, b: string) {
@@ -41,6 +49,10 @@ export function closest<T>(items: T[], query: string, getNames: (item: T) => (st
     if (!best || score > best.score) best = { item, score };
   }
   return best && best.score >= minScore ? best : null;
+}
+
+export function sameNormalized(a: string, b: string) {
+  return normalizeText(a) === normalizeText(b);
 }
 
 function levenshtein(a: string, b: string) {
