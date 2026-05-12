@@ -151,8 +151,14 @@ async function findOrCreateMatchingJob(title: string, skillIds: string[]) {
     include: { skills: { include: { skill: true } } }
   });
 
-  const match = closest(jobs, title, (j) => [j.titleAr, j.titleEn], 0.76);
-  if (match) return match.item;
+  const normalizedTitle = normalizeText(title);
+  const match = jobs.find(
+    (j) =>
+      normalizeText(j.titleAr) === normalizedTitle ||
+      (j.titleEn && normalizeText(j.titleEn) === normalizedTitle)
+  );
+
+  if (match) return match;
 
   const created = await prisma.job.create({
     data: {
