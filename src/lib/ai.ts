@@ -122,7 +122,7 @@ export async function analyzeWithClaude(input: AnalysisInput): Promise<{ report:
     }
   };
 
-  const userMessage = `${SCHEMA_HINT}\n\nبيانات المستخدم والكتالوج:\n${JSON.stringify(userPayload, null, 2)}\n\nأعد JSON فقط.`;
+  const userMessage = `${SCHEMA_HINT}\n\nبيانات المستخدم والكتالوج:\n${JSON.stringify(userPayload, null, 2)}\n\nأعد JSON فقط بدون أي نص قبله أو بعده.`;
   const content: any[] = [];
   if (input.cvFile?.mediaType === "application/pdf") {
     content.push({
@@ -145,30 +145,40 @@ export async function analyzeWithClaude(input: AnalysisInput): Promise<{ report:
   }
   content.push({ type: "text", text: userMessage });
 
-  const response = await client.messages.create({
-    model: ANALYSIS_MODEL,
-    max_tokens: 6000,
-    temperature: 0.3,
-    system: SYSTEM_PROMPT,
-    messages: [{ role: "user", content }]
-  });
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await client.messages.create({
+        model: ANALYSIS_MODEL,
+        max_tokens: 6000,
+        temperature: attempt === 0 ? 0.3 : 0.1,
+        system: SYSTEM_PROMPT,
+        messages: [{ role: "user", content }]
+      });
 
-  const text = response.content
-    .map((c) => (c.type === "text" ? c.text : ""))
-    .join("\n")
-    .trim();
+      const text = response.content
+        .map((c) => (c.type === "text" ? c.text : ""))
+        .join("\n")
+        .trim();
 
-  const jsonText = extractJson(text);
-  const parsed = parseJsonSafely(jsonText);
-  return {
-    report: normalize(parsed),
-    usage: {
-      inputTokens: response.usage.input_tokens ?? 0,
-      outputTokens: response.usage.output_tokens ?? 0,
-      totalTokens: (response.usage.input_tokens ?? 0) + (response.usage.output_tokens ?? 0),
-      model: ANALYSIS_MODEL
+      const jsonText = extractJson(text);
+      const parsed = parseJsonSafely(jsonText);
+      return {
+        report: normalize(parsed),
+        usage: {
+          inputTokens: response.usage.input_tokens ?? 0,
+          outputTokens: response.usage.output_tokens ?? 0,
+          totalTokens: (response.usage.input_tokens ?? 0) + (response.usage.output_tokens ?? 0),
+          model: ANALYSIS_MODEL
+        }
+      };
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      // Retry only for parse errors; surface auth/network errors immediately.
+      if (!/تعذّر قراءة استجابة/.test(lastError.message)) throw lastError;
     }
-  };
+  }
+  throw lastError ?? new Error("فشل تحليل الذكاء الاصطناعي");
 }
 
 function extractJson(text: string): string {

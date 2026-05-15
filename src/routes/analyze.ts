@@ -1,11 +1,26 @@
-import { Router } from "express";
+import { Router, type RequestHandler } from "express";
+import multer from "multer";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { analyzeWithClaude, type AnalysisInput } from "../lib/ai";
 import { cvUpload, extractCvText } from "../lib/cvExtract";
-import { closest, splitList } from "../lib/textMatching";
+import { closest, normalizeText, splitList } from "../lib/textMatching";
 
 export const analyzeRouter = Router();
+
+// Wrap multer so failures are returned as friendly JSON instead of crashing the request.
+const uploadCv: RequestHandler = (req, res, next) => {
+  cvUpload.single("cv")(req, res, (err) => {
+    if (!err) return next();
+    if (err instanceof multer.MulterError) {
+      if (err.code === "LIMIT_FILE_SIZE") {
+        return res.status(413).json({ error: "حجم الملف يتجاوز الحد الأقصى (12 ميجابايت)." });
+      }
+      return res.status(400).json({ error: "تعذر رفع الملف. حاول مرة أخرى." });
+    }
+    return res.status(400).json({ error: err?.message || "تعذر قراءة الملف." });
+  });
+};
 
 const Schema = z.object({
   fullName: z.string().min(2).max(100),
@@ -15,7 +30,7 @@ const Schema = z.object({
   currentCourses: z.string().max(2000).optional()
 });
 
-analyzeRouter.post("/", cvUpload.single("cv"), async (req, res) => {
+analyzeRouter.post("/", uploadCv, async (req, res) => {
   const parsed = Schema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "الرجاء التحقق من الحقول المطلوبة" });
@@ -30,7 +45,9 @@ analyzeRouter.post("/", cvUpload.single("cv"), async (req, res) => {
       currentCourses: (parsed.data.currentCourses || "").trim()
     };
 
-    if (!data.currentSkills && !cvText) {
+    // Accept if either skills text is given OR a CV file is uploaded — Claude can
+    // still read the file via vision even when local text extraction fails.
+    if (!data.currentSkills && !req.file) {
       res.status(400).json({ error: "أدخل المهارات الحالية أو ارفع سيرة ذاتية لاستخراجها." });
       return;
     }

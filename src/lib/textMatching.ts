@@ -45,7 +45,9 @@ export function similarity(a: string, b: string) {
 export function closest<T>(items: T[], query: string, getNames: (item: T) => (string | null | undefined)[], minScore = 0.78) {
   let best: { item: T; score: number } | null = null;
   for (const item of items) {
-    const score = Math.max(...getNames(item).filter(Boolean).map((name) => similarity(query, String(name))));
+    const names = getNames(item).filter(Boolean) as string[];
+    if (names.length === 0) continue;
+    const score = names.reduce((acc, name) => Math.max(acc, similarity(query, name)), 0);
     if (!best || score > best.score) best = { item, score };
   }
   return best && best.score >= minScore ? best : null;
